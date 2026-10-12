@@ -313,6 +313,11 @@ class DuoChat {
     this.inputArea.style.height = 'auto';
     this.appendMessageElement(message);
     this.scrollToBottom();
+
+    // Trigger disguised notification for the other account on this device
+    if (window.VaultNotification) {
+      window.VaultNotification.notifyMessage(message);
+    }
   }
 
   // Handle Selection of Photos, Videos, and Documents
@@ -350,6 +355,11 @@ class DuoChat {
 
       this.appendMessageElement(message);
       this.scrollToBottom();
+
+      // Trigger disguised notification for the other account on this device
+      if (window.VaultNotification) {
+        window.VaultNotification.notifyMessage(message);
+      }
     };
     reader.readAsDataURL(file);
     this.fileInput.value = '';
@@ -404,6 +414,11 @@ class DuoChat {
             if (window.Storage) window.Storage.saveMessage(message);
             this.appendMessageElement(message);
             this.scrollToBottom();
+
+            // Trigger disguised notification for the other account on this device
+            if (window.VaultNotification) {
+              window.VaultNotification.notifyMessage(message);
+            }
           };
           reader.readAsDataURL(audioBlob);
 

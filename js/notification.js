@@ -18,6 +18,7 @@ class VaultNotificationManager {
     this.bannerTimeout = null;
     this.currentCallPayload = null;
     this.audioCtx = null;
+    this.notifiedMessageIds = new Set();
 
     this.init();
   }
@@ -107,7 +108,7 @@ class VaultNotificationManager {
     }
   }
 
-  // 1. Inbound Message Handler
+  // 1. Inbound & Outbound Message Handler (Supports both accounts on this single device)
   notifyMessage(msg) {
     if (!msg) return;
 
@@ -117,32 +118,33 @@ class VaultNotificationManager {
       return;
     }
 
-    const myRole = window.App ? window.App.currentRole : 'boy';
-    // Only notify if message is from partner
-    if (msg.sender === myRole) return;
+    // Deduplicate identical message ID alerts
+    if (msg.id) {
+      if (this.notifiedMessageIds.has(msg.id)) return;
+      this.notifiedMessageIds.add(msg.id);
+      setTimeout(() => this.notifiedMessageIds.delete(msg.id), 25000);
+    }
 
-    // Check if user is currently inside the chat and viewing the conversation
-    const isChatActive = window.App && window.App.activeView === 'chat';
-
+    // Camouflage text resolver:
+    // If msg is from Jean ('girl') -> "Mysore temperature is hot" (Karthik's notification)
+    // If msg is from Karthik ('boy') -> "Mysore temperature is cool" (Jean's notification)
     const camouflage = this.getDisguisedMessageAlert(msg.sender);
 
     // Play subtle pleasant chime
     this.playChime('message');
 
-    // Show floating in-app banner if user is not currently in chat
-    if (!isChatActive) {
-      this.showBanner({
-        title: camouflage.title,
-        text: camouflage.body,
-        avatar: camouflage.icon,
-        type: 'message',
-        role: msg.sender
-      });
-    }
+    // Show floating in-app banner for both accounts
+    this.showBanner({
+      title: camouflage.title,
+      text: camouflage.body,
+      avatar: camouflage.icon,
+      type: 'message',
+      role: msg.sender
+    });
 
     // Trigger Phone System Notification (works on Android lock screen & status bar)
     this.sendSystemNotification(camouflage.title, camouflage.body, camouflage.icon, {
-      tag: 'iweather-radar-msg',
+      tag: 'iweather-radar-' + (msg.id || Date.now()),
       type: 'message'
     });
   }
