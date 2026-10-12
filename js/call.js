@@ -280,22 +280,78 @@ class DuoCallManager {
 
     this.pendingOffer = payload.offer;
     this.currentCallType = payload.callType || 'voice';
+
+    const isCallsAllowed = window.VaultNotification ? window.VaultNotification.isCallsAllowed() : true;
+    const isChatActive = window.App && window.App.activeView === 'chat';
+
+    // If calls toggle is OFF and user is not inside chat: Silent Stealth Mode!
+    if (!isCallsAllowed && !isChatActive) {
+      this.callState = 'incoming_silent';
+      this.pendingCallPayload = payload;
+      console.log('🔇 Call held in Silent Stealth mode until chat is opened');
+      return;
+    }
+
     this.callState = 'incoming';
 
-    // Show Incoming Modal
-    const callerName = payload.partnerName || (window.App && window.App.currentRole === 'girl' ? 'Karthikuuuuu' : 'JeanGrey');
-    const partnerAvatar = callerName.includes('Jean')
-      ? 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767001/jean_u8zloq.png'
-      : 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767000/peter_ayhcrs.png';
+    // Format caller name accurately: e.g. "Jean" or "Karthik"
+    const isGirl = window.App && window.App.currentRole === 'girl';
+    const callerRole = payload.sender || (isGirl ? 'boy' : 'girl');
+    const settings = window.Storage ? window.Storage.getSettings() : {};
+    let callerName = callerRole === 'girl' ? (settings.girlName || 'Jean') : (settings.boyName || 'Karthik');
+    if (callerRole === 'girl' && callerName.toLowerCase().includes('jean')) callerName = 'Jean';
+    if (callerRole === 'boy' && callerName.toLowerCase().includes('karthik')) callerName = 'Karthik';
 
-    if (this.incomingName) this.incomingName.textContent = callerName;
+    const partnerAvatar = callerRole === 'girl'
+      ? (settings.girlAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767001/jean_u8zloq.png')
+      : (settings.boyAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767000/peter_ayhcrs.png');
+
+    // Title: "[Name] calling you"
+    if (this.incomingName) this.incomingName.textContent = `${callerName} calling you`;
     if (this.incomingAvatar) {
       this.incomingAvatar.innerHTML = `<img src="${partnerAvatar}" class="call-avatar-img" alt="${callerName}">`;
     }
     if (this.incomingType) this.incomingType.textContent = `Incoming ${this.currentCallType === 'video' ? 'Video' : 'Voice'} Call...`;
-    if (this.incomingModal) this.incomingModal.classList.add('active');
 
-    this.playRingtone(false); // incoming ringtone
+    // Only open the full modal immediately if in chat
+    if (isChatActive) {
+      if (this.incomingModal) this.incomingModal.classList.add('active');
+    }
+
+    // Play ringtone and notify banner if allowed
+    if (isCallsAllowed) {
+      this.playRingtone(false); // incoming ringtone
+      if (window.VaultNotification) {
+        window.VaultNotification.notifyIncomingCall(payload);
+      }
+    }
+  }
+
+  // Present incoming call once the user opens the private chat
+  presentPendingCall() {
+    if (this.callState === 'incoming_silent' && this.pendingCallPayload) {
+      const payload = this.pendingCallPayload;
+      this.callState = 'incoming';
+
+      const isGirl = window.App && window.App.currentRole === 'girl';
+      const callerRole = payload.sender || (isGirl ? 'boy' : 'girl');
+      const settings = window.Storage ? window.Storage.getSettings() : {};
+      let callerName = callerRole === 'girl' ? (settings.girlName || 'Jean') : (settings.boyName || 'Karthik');
+      if (callerRole === 'girl' && callerName.toLowerCase().includes('jean')) callerName = 'Jean';
+      if (callerRole === 'boy' && callerName.toLowerCase().includes('karthik')) callerName = 'Karthik';
+
+      const partnerAvatar = callerRole === 'girl'
+        ? (settings.girlAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767001/jean_u8zloq.png')
+        : (settings.boyAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767000/peter_ayhcrs.png');
+
+      if (this.incomingName) this.incomingName.textContent = `${callerName} calling you`;
+      if (this.incomingAvatar) {
+        this.incomingAvatar.innerHTML = `<img src="${partnerAvatar}" class="call-avatar-img" alt="${callerName}">`;
+      }
+      if (this.incomingType) this.incomingType.textContent = `Incoming ${this.currentCallType === 'video' ? 'Video' : 'Voice'} Call...`;
+      if (this.incomingModal) this.incomingModal.classList.add('active');
+      this.playRingtone(false);
+    }
   }
 
   async acceptIncomingCall() {
@@ -371,6 +427,14 @@ class DuoCallManager {
 
   handleCallEndedByPeer() {
     this.stopRingtone();
+    if (window.VaultNotification) {
+      window.VaultNotification.hideBanner();
+    }
+    if (this.callState === 'incoming_silent') {
+      this.callState = 'idle';
+      this.pendingCallPayload = null;
+      return;
+    }
     if (window.App) window.App.showToast('Call ended', 'info');
     this.endCall(false);
   }
@@ -456,6 +520,9 @@ class DuoCallManager {
 
   endCall(notifyPeer = true) {
     this.stopRingtone();
+    if (window.VaultNotification) {
+      window.VaultNotification.hideBanner();
+    }
     clearInterval(this.callDurationTimer);
 
     if (notifyPeer && this.callState !== 'idle') {

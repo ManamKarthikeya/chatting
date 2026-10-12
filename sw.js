@@ -1,4 +1,4 @@
-const CACHE_NAME = 'iweather-v12';
+const CACHE_NAME = 'iweather-v13';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const ASSETS_TO_CACHE = [
   './js/chat.js',
   './js/storage.js',
   './js/security.js',
+  './js/notification.js',
   './js/firebase-config.js',
   './icons/icon-192.png',
   './icons/icon-512.png'

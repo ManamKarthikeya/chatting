@@ -80,6 +80,14 @@ class AppController {
     this.switchView(this.viewChat);
     this.activeView = 'chat';
     this.showToast(`Duo Vault Unlocked • ${role === 'girl' ? "👧 JeanGrey's View" : "👦 Karthik's View"}`, 'success');
+
+    if (window.VaultNotification) {
+      window.VaultNotification.hideBanner();
+    }
+
+    if (window.DuoCallManagerInstance && window.DuoCallManagerInstance.presentPendingCall) {
+      window.DuoCallManagerInstance.presentPendingCall();
+    }
   }
 
   switchView(targetView, instant = false) {

@@ -29,6 +29,9 @@ class StorageEngine {
           const { type, payload } = event.data || {};
           if (type === 'NEW_MESSAGE') {
             this.notifyMessageListeners(payload);
+            if (window.VaultNotification) {
+              window.VaultNotification.notifyMessage(payload);
+            }
           } else if (type === 'HEART_BURST') {
             if (window.App && window.App.triggerHeartShower) {
               window.App.triggerHeartShower(false);
@@ -90,6 +93,9 @@ class StorageEngine {
   listenFirestore() {
     if (!this.firestoreDb) return;
     try {
+      const appStartTime = Date.now() - 5000;
+      let initialLoadDone = false;
+
       this.unsubscribeFirestore = this.firestoreDb
         .collection('duo_chat')
         .orderBy('timestamp', 'asc')
@@ -102,6 +108,21 @@ class StorageEngine {
           localStorage.setItem(this.STORAGE_KEY, JSON.stringify(remoteMessages));
           // Notify UI listeners
           this.notifyMessageListeners(remoteMessages, true);
+
+          // If this is after initial load, detect new incoming messages
+          if (initialLoadDone) {
+            snapshot.docChanges().forEach((change) => {
+              if (change.type === 'added') {
+                const data = change.doc.data();
+                if (data && data.timestamp > appStartTime) {
+                  if (window.VaultNotification) {
+                    window.VaultNotification.notifyMessage(data);
+                  }
+                }
+              }
+            });
+          }
+          initialLoadDone = true;
         }, (error) => {
           console.warn('Firestore onSnapshot error:', error);
         });
@@ -187,7 +208,9 @@ class StorageEngine {
       boyAvatar: 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767000/peter_ayhcrs.png',
       girlAvatar: 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767001/jean_u8zloq.png',
       chatWallpaper: 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767002/Split-Panel_Portrait__Wary_Woman_Concerned_Man_y0v1vu.png',
-      anniversaryDate: '2023-06-15'
+      anniversaryDate: '2023-06-15',
+      notificationsEnabled: true,
+      callNotificationsEnabled: true
     };
 
     try {
@@ -200,7 +223,9 @@ class StorageEngine {
         // Ensure new DP URLs take effect even if older settings were cached
         boyAvatar: parsed.boyAvatar || defaults.boyAvatar,
         girlAvatar: parsed.girlAvatar || defaults.girlAvatar,
-        chatWallpaper: parsed.chatWallpaper || defaults.chatWallpaper
+        chatWallpaper: parsed.chatWallpaper || defaults.chatWallpaper,
+        notificationsEnabled: parsed.notificationsEnabled !== undefined ? parsed.notificationsEnabled : true,
+        callNotificationsEnabled: parsed.callNotificationsEnabled !== undefined ? parsed.callNotificationsEnabled : true
       };
     } catch (e) {
       return defaults;

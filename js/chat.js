@@ -33,6 +33,16 @@ class DuoChat {
     this.saveFirebaseBtn = document.getElementById('btn-save-firebase-config');
     this.clearHistoryBtn = document.getElementById('btn-clear-chat-history');
 
+    // Notification Toggles & Controls
+    this.settingNotifToggle = document.getElementById('setting-notifications-toggle');
+    this.settingCallsToggle = document.getElementById('setting-calls-toggle');
+    this.btnTestNotif = document.getElementById('btn-test-notif');
+    this.btnRequestPerm = document.getElementById('btn-request-notif-perm');
+    this.btnPermText = document.getElementById('btn-perm-text');
+    this.notifStatusCallout = document.getElementById('notif-status-callout');
+    this.notifStatusText = document.getElementById('notif-status-text');
+    this.settingsRoleSubtitle = document.getElementById('settings-role-subtitle');
+
     // Audio recording state
     this.mediaRecorder = null;
     this.audioChunks = [];
@@ -151,6 +161,34 @@ class DuoChat {
         if (confirm('Are you sure you want to clear your private chat history?')) {
           if (window.Storage) window.Storage.clearAllHistory();
           this.closeSettings();
+        }
+      });
+    }
+
+    // Notification Toggles & Actions
+    if (this.settingNotifToggle) {
+      this.settingNotifToggle.addEventListener('change', () => this.updateNotifUIStatus());
+    }
+    if (this.settingCallsToggle) {
+      this.settingCallsToggle.addEventListener('change', () => this.updateNotifUIStatus());
+    }
+    if (this.btnTestNotif) {
+      this.btnTestNotif.addEventListener('click', () => {
+        if (window.VaultNotification) {
+          window.VaultNotification.testNotification();
+        }
+      });
+    }
+    if (this.btnRequestPerm) {
+      this.btnRequestPerm.addEventListener('click', async () => {
+        if (window.VaultNotification) {
+          const res = await window.VaultNotification.requestPermission();
+          if (res === 'granted') {
+            if (this.btnPermText) this.btnPermText.textContent = 'Push Enabled ✓';
+            if (window.App) window.App.showToast('Push notifications enabled!', 'success');
+          } else {
+            if (window.App) window.App.showToast(`Notification status: ${res}`, 'info');
+          }
         }
       });
     }
@@ -665,14 +703,34 @@ class DuoChat {
     if (this.currentRole === 'girl') {
       this.settingPartnerNameInput.value = settings.boyName || '';
       this.settingUserMoodInput.value = settings.girlMood || '';
+      if (this.settingsRoleSubtitle) this.settingsRoleSubtitle.textContent = "Active View: 👧 JeanGrey";
     } else {
       this.settingPartnerNameInput.value = settings.girlName || '';
       this.settingUserMoodInput.value = settings.boyMood || '';
+      if (this.settingsRoleSubtitle) this.settingsRoleSubtitle.textContent = "Active View: 👦 Karthik";
     }
 
     if (this.settingMilestoneDateInput) {
       this.settingMilestoneDateInput.value = settings.anniversaryDate || '';
     }
+
+    // Populate notification toggles
+    if (this.settingNotifToggle) {
+      this.settingNotifToggle.checked = settings.notificationsEnabled !== false;
+    }
+    if (this.settingCallsToggle) {
+      this.settingCallsToggle.checked = settings.callNotificationsEnabled !== false;
+    }
+
+    // Update permission button text
+    if (this.btnPermText && window.VaultNotification) {
+      const status = window.VaultNotification.checkPermissionStatus();
+      if (status === 'granted') this.btnPermText.textContent = 'Push Enabled ✓';
+      else if (status === 'denied') this.btnPermText.textContent = 'Push Blocked ✕';
+      else this.btnPermText.textContent = 'Phone Push';
+    }
+
+    this.updateNotifUIStatus(false);
 
     // Show saved Firebase config
     const savedFb = localStorage.getItem('iweather_firebase_config');
@@ -681,6 +739,29 @@ class DuoChat {
     }
 
     this.settingsModal.classList.add('active');
+  }
+
+  updateNotifUIStatus(saveToStorage = true) {
+    const isNotif = this.settingNotifToggle ? this.settingNotifToggle.checked : true;
+    const isCalls = this.settingCallsToggle ? this.settingCallsToggle.checked : true;
+
+    if (this.notifStatusCallout && this.notifStatusText) {
+      if (!isNotif && !isCalls) {
+        this.notifStatusCallout.className = 'settings-status-callout silent';
+        this.notifStatusText.textContent = '🛡️ Silent Stealth Mode: Pop-ups & call alerts are completely disabled outside the vault.';
+      } else {
+        this.notifStatusCallout.className = 'settings-status-callout';
+        const partner = this.currentRole === 'girl' ? 'Karthik' : 'Jean';
+        this.notifStatusText.textContent = `🟢 Active Alerts: Instant pop-ups when ${partner} messages or calls you.`;
+      }
+    }
+
+    if (saveToStorage && window.Storage) {
+      const settings = window.Storage.getSettings() || {};
+      settings.notificationsEnabled = isNotif;
+      settings.callNotificationsEnabled = isCalls;
+      window.Storage.saveSettings(settings);
+    }
   }
 
   closeSettings() {
@@ -694,6 +775,13 @@ class DuoChat {
     } else {
       settings.girlName = this.settingPartnerNameInput.value.trim() || 'JeanGrey';
       settings.boyMood = this.settingUserMoodInput.value.trim() || 'Thinking of you ❤️';
+    }
+
+    if (this.settingNotifToggle) {
+      settings.notificationsEnabled = this.settingNotifToggle.checked;
+    }
+    if (this.settingCallsToggle) {
+      settings.callNotificationsEnabled = this.settingCallsToggle.checked;
     }
 
     if (this.settingMilestoneDateInput) {
