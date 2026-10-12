@@ -3,12 +3,6 @@
   "version": "1.0.0",
   "description": "iWeather - Disguised Secure PWA with Real Weather & Private Duo Space",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
     "start": "npx serve ."
-  },
-  "devDependencies": {
-    "vite": "^5.4.11"
   }
 }
