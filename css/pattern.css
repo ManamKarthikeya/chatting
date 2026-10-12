@@ -1,0 +1,201 @@
+/* ==========================================================================
+   iWeather Pattern Screen - Disguised Enterprise Lock
+   ========================================================================== */
+
+#view-pattern {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom)) 24px;
+  background: radial-gradient(circle at 50% 20%, #152238 0%, #0a0f1d 80%);
+}
+
+/* Header */
+.pattern-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-top: 15px;
+}
+
+.brand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  margin-bottom: 12px;
+}
+
+.brand-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--accent-weather);
+}
+
+.brand-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+  color: #fff;
+}
+
+.pattern-title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 6px;
+  letter-spacing: -0.3px;
+}
+
+.pattern-subtitle {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  max-width: 260px;
+  line-height: 1.4;
+}
+
+/* Pattern Area */
+.pattern-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  margin: auto 0;
+}
+
+.pattern-canvas-wrapper {
+  position: relative;
+  width: 290px;
+  height: 290px;
+  touch-action: none;
+}
+
+/* Background canvas where lines are drawn */
+#pattern-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* 3x3 Grid of Dots */
+.pattern-dots-grid {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  z-index: 3;
+}
+
+.pattern-dot-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pattern-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s, box-shadow 0.2s;
+  position: relative;
+  pointer-events: none;
+}
+
+.pattern-dot::before {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background-color 0.2s;
+}
+
+.pattern-dot.active {
+  background: #38bdf8;
+  transform: scale(1.35);
+  box-shadow: 0 0 20px #38bdf8, 0 0 35px rgba(56, 189, 248, 0.6);
+}
+
+.pattern-dot.active::before {
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.pattern-dot.success {
+  background: #34d399;
+  box-shadow: 0 0 22px #34d399, 0 0 38px rgba(52, 211, 153, 0.6);
+}
+
+.pattern-dot.love {
+  background: #f43f5e;
+  box-shadow: 0 0 22px #f43f5e, 0 0 38px rgba(244, 63, 94, 0.6);
+}
+
+/* Pattern Feedback */
+.pattern-status {
+  margin-top: 18px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-align: center;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: color 0.2s;
+}
+
+.pattern-status.loading {
+  color: var(--accent-weather);
+}
+
+.pattern-status.verified {
+  color: #34d399;
+}
+
+/* Footer & Decoy Bypass */
+.pattern-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 8px;
+}
+
+.btn-decoy-bypass {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all var(--transition-fast);
+}
+
+.btn-decoy-bypass:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+}
+
+.pattern-hint {
+  font-size: 11.5px;
+  color: #475569;
+  letter-spacing: 0.3px;
+}
