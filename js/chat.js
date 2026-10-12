@@ -193,6 +193,15 @@ class DuoChat {
       });
     }
 
+    // Lock App Button
+    if (this.lockBtn) {
+      this.lockBtn.addEventListener('click', () => {
+        if (window.App && window.App.lockVault) {
+          window.App.lockVault();
+        }
+      });
+    }
+
     // Tap partner avatar in header to view full resolution DP in Lightbox!
     const avatarWrap = document.getElementById('chat-avatar-wrap');
     if (avatarWrap) {
@@ -213,6 +222,10 @@ class DuoChat {
       } else if (msg) {
         this.appendMessageElement(msg);
         this.scrollToBottom();
+        // If user is currently looking at chat, mark incoming message as read immediately
+        if (msg.sender !== this.currentRole && window.App && window.App.activeView === 'chat') {
+          if (window.Storage) window.Storage.markAllAsReadBy(this.currentRole);
+        }
       }
     });
 
@@ -254,6 +267,11 @@ class DuoChat {
     }
 
     this.renderAllMessages();
+
+    // Mark messages as read when opening the chat (turns partner's black ticks to blue!)
+    if (window.Storage) {
+      window.Storage.markAllAsReadBy(role);
+    }
   }
 
   calculateMilestone(dateStr) {
@@ -284,7 +302,7 @@ class DuoChat {
       type: 'text',
       text: text,
       timestamp: Date.now(),
-      status: 'read'
+      status: 'sent'
     };
 
     if (window.Storage) {
@@ -323,7 +341,7 @@ class DuoChat {
         fileSize: this.formatBytes(file.size),
         fileMime: file.type,
         timestamp: Date.now(),
-        status: 'read'
+        status: 'sent'
       };
 
       if (window.Storage) {
@@ -380,7 +398,7 @@ class DuoChat {
               mediaUrl: base64Audio,
               duration: Math.max(1, Math.round((Date.now() - this.recordingStartTime) / 1000)),
               timestamp: Date.now(),
-              status: 'read'
+              status: 'sent'
             };
 
             if (window.Storage) window.Storage.saveMessage(message);
@@ -467,6 +485,23 @@ class DuoChat {
     this.scrollToBottom();
   }
 
+  // Double checkmarks: BLACK when sent, BLUE when read
+  renderTicksHtml(status) {
+    const isRead = status === 'read';
+    return `<span class="read-ticks ${isRead ? 'read' : 'sent'}" title="${isRead ? 'Seen' : 'Sent'}">&#10003;&#10003;</span>`;
+  }
+
+  // Turn all black ticks into blue in DOM when partner opens/reads chat
+  markTicksAsReadInDOM() {
+    if (!this.messagesContainer) return;
+    const sentTicks = this.messagesContainer.querySelectorAll('.read-ticks.sent');
+    sentTicks.forEach((tick) => {
+      tick.classList.remove('sent');
+      tick.classList.add('read');
+      tick.title = 'Seen';
+    });
+  }
+
   appendMessageElement(msg) {
     if (!this.messagesContainer) return;
     const isSent = msg.sender === this.currentRole;
@@ -503,7 +538,7 @@ class DuoChat {
           </div>
           <div class="message-meta">
             <span>${timeStr}</span>
-            ${isSent ? '<span class="read-ticks">&#10003;&#10003;</span>' : ''}
+            ${isSent ? this.renderTicksHtml(msg.status) : ''}
           </div>
         </div>
       `;
@@ -530,7 +565,7 @@ class DuoChat {
           </div>
           <div class="message-meta">
             <span>${timeStr}</span>
-            ${isSent ? '<span class="read-ticks">&#10003;&#10003;</span>' : ''}
+            ${isSent ? this.renderTicksHtml(msg.status) : ''}
           </div>
         </div>
       `;
@@ -555,7 +590,7 @@ class DuoChat {
           </div>
           <div class="message-meta">
             <span>${timeStr}</span>
-            ${isSent ? '<span class="read-ticks">&#10003;&#10003;</span>' : ''}
+            ${isSent ? this.renderTicksHtml(msg.status) : ''}
           </div>
         </div>
       `;
@@ -589,7 +624,7 @@ class DuoChat {
           </div>
           <div class="message-meta">
             <span>${timeStr}</span>
-            ${isSent ? '<span class="read-ticks">&#10003;&#10003;</span>' : ''}
+            ${isSent ? this.renderTicksHtml(msg.status) : ''}
           </div>
         </div>
       `;
@@ -600,7 +635,7 @@ class DuoChat {
           <span>${this.escapeHtml(msg.text)}</span>
           <div class="message-meta">
             <span>${timeStr}</span>
-            ${isSent ? '<span class="read-ticks">&#10003;&#10003;</span>' : ''}
+            ${isSent ? this.renderTicksHtml(msg.status) : ''}
           </div>
         </div>
       `;

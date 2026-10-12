@@ -645,9 +645,29 @@
 }
 
 .read-ticks {
-  color: #38bdf8;
-  font-weight: 700;
-  font-size: 12px;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -3px;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 3px;
+  line-height: 1;
+  vertical-align: middle;
+  transition: color 0.3s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s ease;
+}
+
+/* Sent & Unread State -> BLACK TICKS as requested */
+.read-ticks.sent {
+  color: #000000 !important;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.5), 0 0 2px rgba(255, 255, 255, 0.2);
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.4));
+}
+
+/* Seen & Read State -> BLUE TICKS */
+.read-ticks.read {
+  color: #38bdf8 !important;
+  text-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.5));
 }
 
 /* Message Heart Reaction */

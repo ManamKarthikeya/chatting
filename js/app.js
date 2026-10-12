@@ -65,6 +65,28 @@ class AppController {
     }
   }
 
+  // Lock Vault (Called when app is backgrounded / recent apps or user locks manually)
+  lockVault() {
+    if (window.DuoCallManagerInstance && window.DuoCallManagerInstance.endCall) {
+      window.DuoCallManagerInstance.endCall(true);
+    }
+    if (window.DuoChatInstance) {
+      if (window.DuoChatInstance.settingsModal) {
+        window.DuoChatInstance.settingsModal.classList.remove('active');
+      }
+      if (window.DuoChatInstance.emojiTray) {
+        window.DuoChatInstance.emojiTray.classList.remove('active');
+      }
+    }
+    if (this.lightbox) {
+      this.lightbox.classList.remove('active');
+    }
+    if (window.VaultNotification) {
+      window.VaultNotification.hideBanner();
+    }
+    this.openPattern();
+  }
+
   // View Routing: Authentic Weather Dashboard
   openWeather(instant = false) {
     this.switchView(this.viewWeather, instant);

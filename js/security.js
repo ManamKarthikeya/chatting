@@ -24,28 +24,54 @@ class VaultSecurityManager {
     this.bindScreenRecordingDefense();
   }
 
-  // 1. App Switcher / Blur Blackout Curtain (Protects mobile screenshots & multitasking previews)
+  // 1. App Switcher / Blur Blackout Curtain & Direct Auto-Lock on Recent Apps
   bindWindowFocusListeners() {
-    // When window loses focus (e.g. mobile screenshot gesture, task switching, Alt+Tab, Snipping Tool)
+    this.blurLockTimeout = null;
+
+    // When window loses focus (e.g. mobile recent apps gesture, task switching, Alt+Tab)
     window.addEventListener('blur', () => {
       if (this.isChatActive()) {
         this.showPrivacyCurtain();
+        // If blurred (e.g. recent apps carousel active or home screen pull), lock to pattern screen after short buffer
+        clearTimeout(this.blurLockTimeout);
+        this.blurLockTimeout = setTimeout(() => {
+          if (!document.hasFocus() || document.visibilityState === 'hidden') {
+            if (this.isChatActive() && window.App && window.App.lockVault) {
+              window.App.lockVault();
+            }
+          }
+        }, 350);
       }
     });
 
-    // When visibility state changes (tab switched, screen turned off, app minimized)
+    // When visibility state changes (recent apps, app minimized, screen turned off, tab switched)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         if (this.isChatActive()) {
           this.showPrivacyCurtain();
+          // Directly lock the vault so recent apps preview and next opening asks for the pattern lock!
+          if (window.App && window.App.lockVault) {
+            window.App.lockVault();
+          }
         }
       } else if (document.visibilityState === 'visible') {
         this.scheduleHidePrivacyCurtain();
       }
     });
 
+    // Mobile OS pagehide event (fired when mobile OS moves app to recent / background)
+    window.addEventListener('pagehide', () => {
+      if (this.isChatActive()) {
+        this.showPrivacyCurtain();
+        if (window.App && window.App.lockVault) {
+          window.App.lockVault();
+        }
+      }
+    });
+
     // When focus returns
     window.addEventListener('focus', () => {
+      clearTimeout(this.blurLockTimeout);
       this.scheduleHidePrivacyCurtain();
     });
   }

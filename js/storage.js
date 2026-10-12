@@ -32,6 +32,23 @@ class StorageEngine {
             if (window.VaultNotification) {
               window.VaultNotification.notifyMessage(payload);
             }
+          } else if (type === 'MESSAGES_READ') {
+            const reader = (payload && payload.reader) || 'girl';
+            const messages = this.getMessages();
+            let changed = false;
+            messages.forEach((m) => {
+              if (m.sender !== reader && m.status !== 'read') {
+                m.status = 'read';
+                changed = true;
+              }
+            });
+            if (changed) {
+              localStorage.setItem(this.STORAGE_KEY, JSON.stringify(messages));
+            }
+            this.notifyMessageListeners(messages, true);
+            if (window.DuoChatInstance && window.DuoChatInstance.markTicksAsReadInDOM) {
+              window.DuoChatInstance.markTicksAsReadInDOM();
+            }
           } else if (type === 'HEART_BURST') {
             if (window.App && window.App.triggerHeartShower) {
               window.App.triggerHeartShower(false);
@@ -143,6 +160,7 @@ class StorageEngine {
 
   // Save new message
   async saveMessage(msg) {
+    if (!msg.status) msg.status = 'sent';
     const messages = this.getMessages();
     messages.push(msg);
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(messages));
@@ -164,6 +182,51 @@ class StorageEngine {
     return msg;
   }
 
+  // Mark all unread messages from partner as read (triggers blue ticks!)
+  async markAllAsReadBy(readerRole) {
+    if (!readerRole) return;
+    const messages = this.getMessages();
+    let hasUnread = false;
+
+    messages.forEach((m) => {
+      if (m.sender !== readerRole && m.status !== 'read') {
+        m.status = 'read';
+        hasUnread = true;
+      }
+    });
+
+    if (hasUnread) {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(messages));
+
+      // Broadcast read receipt locally
+      if (this.channel) {
+        this.channel.postMessage({ type: 'MESSAGES_READ', payload: { reader: readerRole } });
+      }
+
+      // Update in Firebase Firestore
+      if (this.isFirebaseActive && this.firestoreDb) {
+        try {
+          const snapshot = await this.firestoreDb.collection('duo_chat')
+            .where('status', '==', 'sent')
+            .get();
+
+          const batch = this.firestoreDb.batch();
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            if (data && data.sender !== readerRole) {
+              batch.update(doc.ref, { status: 'read' });
+            }
+          });
+          await batch.commit();
+        } catch (e) {
+          console.warn('Firestore batch mark read error:', e);
+        }
+      }
+
+      this.notifyMessageListeners(messages, true);
+    }
+  }
+
   // Send High-Five / Nudge Burst
   sendNudgeBurst() {
     if (this.channel) {
@@ -175,7 +238,7 @@ class StorageEngine {
       type: 'heart',
       text: 'Sent a High-Five! ⚡👊',
       timestamp: Date.now(),
-      status: 'read'
+      status: 'sent'
     };
     this.saveMessage(nudgeMsg);
   }
