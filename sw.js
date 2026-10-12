@@ -1,4 +1,4 @@
-const CACHE_NAME = 'iweather-v16';
+const CACHE_NAME = 'iweather-v17';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -60,12 +60,13 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
+// Network-First strategy: Always fetch latest updates from server, fallback to cache when offline
 self.addEventListener('fetch', (event) => {
-  // Network first, fallback to cache for dynamic weather, cache first for static assets
   if (event.request.method !== 'GET') return;
-  
+
   const url = new URL(event.request.url);
-  // If fetching open-meteo or external API, try network first
+
+  // External APIs (e.g. open-meteo, cloudinary)
   if (url.origin !== location.origin) {
     event.respondWith(
       fetch(event.request).catch(() => caches.match(event.request))
@@ -73,18 +74,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // App core files: Network first, cache fallback
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Fetch in background to update cache
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
-          }
-        }).catch(() => {});
-        return cachedResponse;
-      }
-      return fetch(event.request);
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
