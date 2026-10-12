@@ -1,7 +1,8 @@
 /**
  * iWeather Stealth Duo Notification Manager
- * Handles in-app floating notification banners, browser system push notifications,
- * Web Audio pleasant chimes, and respects Silent Stealth mode.
+ * Handles disguised Mysore weather alerts ("Mysore temperature is hot / cool"),
+ * atmospheric urgent call advisories, Service Worker mobile push notifications,
+ * Web Audio harmonic chimes, and respects Silent Stealth mode.
  */
 
 class VaultNotificationManager {
@@ -68,24 +69,41 @@ class VaultNotificationManager {
     return settings.notificationsEnabled !== false && settings.callNotificationsEnabled !== false;
   }
 
-  // Partner display name resolver
-  getPartnerDisplayName(senderRole) {
-    const settings = window.Storage ? window.Storage.getSettings() : {};
+  // Disguised weather alert text resolver
+  // If Jean sends -> recipient sees: "Mysore temperature is hot"
+  // If Karthik sends -> recipient sees: "Mysore temperature is cool"
+  getDisguisedMessageAlert(senderRole) {
     if (senderRole === 'girl') {
-      const gName = settings.girlName || 'Jean';
-      return gName.toLowerCase().includes('jean') ? 'Jean' : gName;
+      return {
+        title: 'iWeather Alert',
+        body: 'Mysore temperature is hot',
+        icon: 'icons/icon-192.png'
+      };
     } else {
-      const bName = settings.boyName || 'Karthik';
-      return bName.toLowerCase().includes('karthik') ? 'Karthik' : bName;
+      return {
+        title: 'iWeather Alert',
+        body: 'Mysore temperature is cool',
+        icon: 'icons/icon-192.png'
+      };
     }
   }
 
-  getPartnerAvatar(senderRole) {
-    const settings = window.Storage ? window.Storage.getSettings() : {};
-    if (senderRole === 'girl') {
-      return settings.girlAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767001/jean_u8zloq.png';
+  // Disguised call advisory resolver
+  // If Jean calls -> recipient sees: "Mysore thunderstorm alert ⚡"
+  // If Karthik calls -> recipient sees: "Mysore cold front warning ❄️"
+  getDisguisedCallAlert(callerRole) {
+    if (callerRole === 'girl') {
+      return {
+        title: 'iWeather Urgent Advisory',
+        body: 'Mysore thunderstorm alert ⚡',
+        icon: 'icons/icon-192.png'
+      };
     } else {
-      return settings.boyAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767000/peter_ayhcrs.png';
+      return {
+        title: 'iWeather Urgent Advisory',
+        body: 'Mysore cold front warning ❄️',
+        icon: 'icons/icon-192.png'
+      };
     }
   }
 
@@ -106,17 +124,7 @@ class VaultNotificationManager {
     // Check if user is currently inside the chat and viewing the conversation
     const isChatActive = window.App && window.App.activeView === 'chat';
 
-    const partnerName = this.getPartnerDisplayName(msg.sender);
-    const partnerAvatar = this.getPartnerAvatar(msg.sender);
-
-    // Exact title required by user: "[Name] messaged you"
-    const title = `${partnerName} messaged you`;
-
-    let preview = msg.text || '';
-    if (msg.type === 'image') preview = '📷 Sent a photo';
-    else if (msg.type === 'video') preview = '🎥 Sent a video';
-    else if (msg.type === 'voice') preview = '🎤 Sent a voice note';
-    else if (msg.type === 'file') preview = `📎 ${msg.fileName || 'Shared a file'}`;
+    const camouflage = this.getDisguisedMessageAlert(msg.sender);
 
     // Play subtle pleasant chime
     this.playChime('message');
@@ -124,16 +132,19 @@ class VaultNotificationManager {
     // Show floating in-app banner if user is not currently in chat
     if (!isChatActive) {
       this.showBanner({
-        title: title,
-        text: preview,
-        avatar: partnerAvatar,
+        title: camouflage.title,
+        text: camouflage.body,
+        avatar: camouflage.icon,
         type: 'message',
         role: msg.sender
       });
     }
 
-    // Trigger Browser / Phone System Notification (works when screen locked or in background tab)
-    this.sendSystemNotification(title, preview, partnerAvatar);
+    // Trigger Phone System Notification (works on Android lock screen & status bar)
+    this.sendSystemNotification(camouflage.title, camouflage.body, camouflage.icon, {
+      tag: 'iweather-radar-msg',
+      type: 'message'
+    });
   }
 
   // 2. Inbound Call Handler
@@ -147,29 +158,31 @@ class VaultNotificationManager {
 
     const myRole = window.App ? window.App.currentRole : 'boy';
     const callerRole = payload.sender || (myRole === 'boy' ? 'girl' : 'boy');
-    const callerName = this.getPartnerDisplayName(callerRole);
-    const callerAvatar = this.getPartnerAvatar(callerRole);
+    if (callerRole === myRole) return;
 
-    // Exact title required by user: "[Name] calling you"
-    const title = `${callerName} calling you`;
-    const callTypeStr = payload.callType === 'video' ? 'Incoming Video Call...' : 'Incoming Voice Call...';
-
+    const camouflage = this.getDisguisedCallAlert(callerRole);
     this.currentCallPayload = payload;
+
+    // Play subtle chime
+    this.playChime('message');
 
     // Show in-app banner if outside chat view
     const isChatActive = window.App && window.App.activeView === 'chat';
     if (!isChatActive) {
       this.showBanner({
-        title: title,
-        text: callTypeStr,
-        avatar: callerAvatar,
+        title: camouflage.title,
+        text: camouflage.body,
+        avatar: camouflage.icon,
         type: 'call',
         role: callerRole
       });
     }
 
     // System notification
-    this.sendSystemNotification(title, callTypeStr, callerAvatar);
+    this.sendSystemNotification(camouflage.title, camouflage.body, camouflage.icon, {
+      tag: 'iweather-radar-call',
+      type: 'call'
+    });
   }
 
   // Display top floating glass banner
@@ -190,14 +203,16 @@ class VaultNotificationManager {
 
     // Configure action buttons
     if (this.bannerActions) {
+      const myRole = window.App ? window.App.currentRole : 'boy';
+
       if (type === 'call') {
         this.bannerActions.innerHTML = `
-          <button class="notif-call-btn notif-accept-btn" id="notif-btn-answer" title="Answer Call">
+          <button class="notif-call-btn notif-accept-btn" id="notif-btn-answer" title="Answer Radar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
             </svg>
           </button>
-          <button class="notif-call-btn notif-decline-btn" id="notif-btn-decline" title="Decline Call">&times;</button>
+          <button class="notif-call-btn notif-decline-btn" id="notif-btn-decline" title="Dismiss">&times;</button>
         `;
 
         const ansBtn = document.getElementById('notif-btn-answer');
@@ -225,10 +240,19 @@ class VaultNotificationManager {
         }
       } else {
         this.bannerActions.innerHTML = `
-          <button class="notif-open-badge" title="Open Chat">Open</button>
+          <button class="notif-open-badge" title="View Alert">View</button>
           <button class="notif-close-cross" title="Dismiss">&times;</button>
         `;
+        const openBtn = this.bannerActions.querySelector('.notif-open-badge');
         const closeCross = this.bannerActions.querySelector('.notif-close-cross');
+
+        if (openBtn) {
+          openBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.handleBannerClick();
+          };
+        }
+
         if (closeCross) {
           closeCross.onclick = (e) => {
             e.stopPropagation();
@@ -240,11 +264,11 @@ class VaultNotificationManager {
 
     this.banner.classList.add('active');
 
-    // Auto-hide messages after 4.5 seconds
+    // Auto-hide messages after 5 seconds
     if (type === 'message') {
       this.bannerTimeout = setTimeout(() => {
         this.hideBanner();
-      }, 4500);
+      }, 5000);
     }
   }
 
@@ -262,20 +286,40 @@ class VaultNotificationManager {
     }
   }
 
-  // System Push / Desktop Notification
-  sendSystemNotification(title, body, iconUrl) {
+  // System Push / Android Notification
+  async sendSystemNotification(title, body, iconUrl, optionsExtra = {}) {
     if (!('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
 
-    try {
-      const n = new Notification(title, {
-        body: body,
-        icon: iconUrl || 'icons/icon-192.png',
-        badge: 'icons/icon-192.png',
-        tag: 'iweather-duo-notif',
-        renotify: true
-      });
+    const notifOptions = {
+      body: body,
+      icon: iconUrl || 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
+      tag: optionsExtra.tag || 'iweather-alert',
+      renotify: true,
+      vibrate: [200, 100, 200],
+      data: {
+        url: './',
+        type: optionsExtra.type || 'message'
+      }
+    };
 
+    // Priority 1: ServiceWorker showNotification (Mandatory for Android Chrome & Installed PWAs)
+    if ('serviceWorker' in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        if (registration && registration.showNotification) {
+          await registration.showNotification(title, notifOptions);
+          return;
+        }
+      } catch (swErr) {
+        console.warn('SW showNotification error, trying fallback:', swErr);
+      }
+    }
+
+    // Priority 2: Standard Desktop Window Notification
+    try {
+      const n = new Notification(title, notifOptions);
       n.onclick = () => {
         window.focus();
         if (window.App) {
@@ -284,7 +328,7 @@ class VaultNotificationManager {
         n.close();
       };
     } catch (e) {
-      console.warn('Could not launch system notification:', e);
+      console.warn('Desktop Notification constructor failed:', e);
     }
   }
 
@@ -334,24 +378,26 @@ class VaultNotificationManager {
   }
 
   // Trigger test notification for Settings testing
-  testNotification() {
+  async testNotification() {
     const myRole = window.App ? window.App.currentRole : 'boy';
     const partnerRole = myRole === 'boy' ? 'girl' : 'boy';
-    const partnerName = this.getPartnerDisplayName(partnerRole);
-    const partnerAvatar = this.getPartnerAvatar(partnerRole);
 
-    const title = `${partnerName} messaged you`;
-    const preview = `Hey! This is a test notification 💬✨`;
+    // Disguised alert preview based on partner role
+    const camouflage = this.getDisguisedMessageAlert(partnerRole);
 
     this.playChime('message');
     this.showBanner({
-      title: title,
-      text: preview,
-      avatar: partnerAvatar,
+      title: camouflage.title,
+      text: camouflage.body,
+      avatar: camouflage.icon,
       type: 'message',
       role: partnerRole
     });
-    this.sendSystemNotification(title, preview, partnerAvatar);
+
+    await this.sendSystemNotification(camouflage.title, camouflage.body, camouflage.icon, {
+      tag: 'iweather-test',
+      type: 'message'
+    });
   }
 }
 

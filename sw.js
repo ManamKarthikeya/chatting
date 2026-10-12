@@ -1,4 +1,4 @@
-const CACHE_NAME = 'iweather-v14';
+const CACHE_NAME = 'iweather-v15';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -40,6 +40,24 @@ self.addEventListener('activate', (event) => {
     })
   );
   self.clients.claim();
+});
+
+// Handle notification tap to focus/open the app
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow('./');
+      }
+    })
+  );
 });
 
 self.addEventListener('fetch', (event) => {

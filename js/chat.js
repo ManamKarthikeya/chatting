@@ -786,8 +786,8 @@ class DuoChat {
         this.notifStatusText.textContent = '🛡️ Silent Stealth Mode: Pop-ups & call alerts are completely disabled outside the vault.';
       } else {
         this.notifStatusCallout.className = 'settings-status-callout';
-        const partner = this.currentRole === 'girl' ? 'Karthik' : 'Jean';
-        this.notifStatusText.textContent = `🟢 Active Alerts: Instant pop-ups when ${partner} messages or calls you.`;
+        const alertLabel = this.currentRole === 'girl' ? 'Mysore temperature is cool' : 'Mysore temperature is hot';
+        this.notifStatusText.textContent = `🟢 Camouflaged Radar Alerts Active: Incoming messages appear disguised as "${alertLabel}".`;
       }
     }
 
