@@ -300,18 +300,29 @@ class DuoCallManager {
       }
     };
 
-    // Track handling
+    // Track handling - ensure both audio and video tracks are captured
     this.peerConnection.ontrack = (event) => {
-      console.log('WebRTC ontrack received:', event.track ? event.track.kind : 'unknown');
-      let stream = event.streams && event.streams[0];
-      if (!stream) {
-        if (!this.remoteStream) {
-          this.remoteStream = new MediaStream();
-        }
-        this.remoteStream.addTrack(event.track);
-        stream = this.remoteStream;
+      console.log('WebRTC ontrack received track kind:', event.track ? event.track.kind : 'unknown');
+
+      if (!this.remoteStream) {
+        this.remoteStream = new MediaStream();
       }
-      this.attachRemoteMedia(stream, event.track ? event.track.kind : null);
+
+      if (event.track) {
+        if (!this.remoteStream.getTracks().some((t) => t.id === event.track.id)) {
+          this.remoteStream.addTrack(event.track);
+        }
+      }
+
+      if (event.streams && event.streams[0]) {
+        event.streams[0].getTracks().forEach((track) => {
+          if (!this.remoteStream.getTracks().some((t) => t.id === track.id)) {
+            this.remoteStream.addTrack(track);
+          }
+        });
+      }
+
+      this.attachRemoteMedia(this.remoteStream, event.track ? event.track.kind : null);
     };
 
     // ICE Connection state
@@ -323,9 +334,12 @@ class DuoCallManager {
         if (this.activeTypeBadge) {
           this.activeTypeBadge.textContent = this.currentCallType === 'video' ? 'HD Video Connected 🔒' : 'Encrypted Voice Connected 🔒';
         }
+        if (this.currentCallType === 'video' && this.remoteVideo && this.remoteStream) {
+          this.remoteVideo.play().catch(() => {});
+        }
       } else if (state === 'checking') {
         if (this.activeTypeBadge) {
-          this.activeTypeBadge.textContent = 'Connecting Voice...';
+          this.activeTypeBadge.textContent = 'Connecting Video & Voice...';
         }
       } else if (state === 'failed') {
         console.warn('ICE connection failed! Attempting restart...');
@@ -355,7 +369,9 @@ class DuoCallManager {
 
     // 1. Dedicated Remote Audio Pipe (Always unmuted, full volume)
     if (this.remoteAudio) {
-      this.remoteAudio.srcObject = stream;
+      if (this.remoteAudio.srcObject !== stream) {
+        this.remoteAudio.srcObject = stream;
+      }
       this.remoteAudio.volume = 1.0;
       this.remoteAudio.muted = false;
       this.remoteAudio.setAttribute('playsinline', '');
@@ -389,11 +405,30 @@ class DuoCallManager {
       console.warn('WebAudio direct bridge notice:', e);
     }
 
-    // 3. Remote Video Element (Only for video calls; keep video element muted so it doesn't conflict with remoteAudio)
+    // 3. Remote Video Element (Only for video calls; keep muted so mobile browser never blocks autoplay)
     if (this.currentCallType === 'video' && this.remoteVideo) {
-      this.remoteVideo.srcObject = stream;
+      this.remoteVideo.style.display = 'block';
+      this.remoteVideo.setAttribute('playsinline', '');
+      this.remoteVideo.setAttribute('webkit-playsinline', '');
       this.remoteVideo.muted = true; // remoteAudio carries the unmuted sound
-      this.remoteVideo.play().catch((err) => console.warn('remoteVideo play failed:', err));
+
+      if (this.remoteVideo.srcObject !== stream) {
+        this.remoteVideo.srcObject = stream;
+      }
+
+      const pVideo = this.remoteVideo.play();
+      if (pVideo !== undefined) {
+        pVideo.catch((err) => {
+          console.warn('remoteVideo.play() caught:', err);
+          const resumeOnTouch = () => {
+            if (this.remoteVideo) this.remoteVideo.play().catch(() => {});
+            window.removeEventListener('click', resumeOnTouch);
+            window.removeEventListener('touchstart', resumeOnTouch);
+          };
+          window.addEventListener('click', resumeOnTouch, { once: true });
+          window.addEventListener('touchstart', resumeOnTouch, { once: true });
+        });
+      }
     }
   }
 
@@ -422,16 +457,21 @@ class DuoCallManager {
         });
       }
 
-      // Ensure local microphone tracks are enabled
+      // Ensure local tracks are enabled
       if (this.localStream) {
         this.localStream.getAudioTracks().forEach((track) => {
           track.enabled = true;
           console.log('Local mic track active:', track.label);
         });
+        this.localStream.getVideoTracks().forEach((track) => {
+          track.enabled = true;
+          console.log('Local video track active:', track.label);
+        });
       }
 
       if (this.localVideo && isVideo) {
         this.localVideo.srcObject = this.localStream;
+        this.localVideo.play().catch(() => {});
       }
 
       this.createPeerConnection();
@@ -576,20 +616,27 @@ class DuoCallManager {
           track.enabled = true;
           console.log('Local mic track active:', track.label);
         });
+        this.localStream.getVideoTracks().forEach((track) => {
+          track.enabled = true;
+          console.log('Local camera track active:', track.label);
+        });
       }
 
       if (this.localVideo && isVideo) {
         this.localVideo.srcObject = this.localStream;
+        this.localVideo.play().catch(() => {});
       }
 
       this.createPeerConnection();
 
+      // Unified Plan standard: Parse offer's transceivers first with setRemoteDescription
+      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(this.pendingOffer));
+      await this.flushCandidateQueue();
+
+      // Then add local tracks so WebRTC binds them to the existing transceivers from the offer
       this.localStream.getTracks().forEach((track) => {
         this.peerConnection.addTrack(track, this.localStream);
       });
-
-      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(this.pendingOffer));
-      await this.flushCandidateQueue();
 
       const answer = await this.peerConnection.createAnswer({
         offerToReceiveAudio: true,
@@ -627,6 +674,15 @@ class DuoCallManager {
       await this.peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
       await this.flushCandidateQueue();
       this.onCallConnected();
+
+      if (this.currentCallType === 'video') {
+        if (this.remoteVideo) this.remoteVideo.style.display = 'block';
+        if (this.localVideo) this.localVideo.style.display = 'block';
+        if (this.activeAudioView) this.activeAudioView.style.display = 'none';
+        if (this.remoteStream) {
+          this.attachRemoteMedia(this.remoteStream, 'video');
+        }
+      }
     } catch (err) {
       console.warn('Error setting remote answer:', err);
     }

@@ -1201,6 +1201,7 @@
   height: 100%;
   object-fit: cover;
   z-index: 1;
+  background: #030712;
   display: none;
 }
 
@@ -1216,6 +1217,7 @@
   z-index: 10;
   background: #1f2937;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  transform: scaleX(-1);
   display: none;
 }
 
