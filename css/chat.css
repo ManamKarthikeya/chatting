@@ -1075,10 +1075,10 @@
 .call-modal {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 24, 0.96);
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
-  z-index: 500;
+  background: rgba(8, 12, 24, 0.98);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  z-index: 9999999 !important;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1099,16 +1099,17 @@
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 12px;
+  gap: 14px;
   z-index: 10;
+  padding: 24px;
 }
 
 .call-avatar-pulse {
   position: relative;
-  width: 96px;
-  height: 96px;
+  width: 110px;
+  height: 110px;
   border-radius: 50%;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   animation: callRingPulse 2s infinite ease-out;
 }
 

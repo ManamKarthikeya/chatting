@@ -111,6 +111,30 @@ class DuoCallManager {
         if (window.App) window.App.openWeather(true);
       });
     }
+
+    // Restore incoming call popup when returning from Recent Apps or unlocking screen
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.callState === 'incoming') {
+        if (this.incomingModal) this.incomingModal.classList.add('active');
+      }
+    });
+    window.addEventListener('focus', () => {
+      if (this.callState === 'incoming') {
+        if (this.incomingModal) this.incomingModal.classList.add('active');
+      }
+    });
+
+    // Listen to ServiceWorker notification actions (e.g. Answer tapped from lockscreen / recent apps)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.action === 'answer' && this.callState === 'incoming') {
+          this.prewarmAudioHardware();
+          this.acceptIncomingCall();
+        } else if (event.data && event.data.action === 'decline' && this.callState === 'incoming') {
+          this.declineIncomingCall();
+        }
+      });
+    }
   }
 
   prewarmAudioHardware() {
@@ -518,22 +542,10 @@ class DuoCallManager {
 
     this.pendingOffer = payload.offer;
     this.currentCallType = payload.callType || 'voice';
-
-    const isCallsAllowed = window.VaultNotification ? window.VaultNotification.isCallsAllowed() : true;
-    const isChatActive = window.App && window.App.activeView === 'chat';
-
-    // If calls toggle is OFF and user is not inside chat: Silent Stealth Mode!
-    if (!isCallsAllowed && !isChatActive) {
-      this.callState = 'incoming_silent';
-      this.pendingCallPayload = payload;
-      console.log('🔇 Call held in Silent Stealth mode until chat is opened');
-      return;
-    }
-
     this.callState = 'incoming';
 
-    const isGirl = window.App && window.App.currentRole === 'girl';
-    const callerRole = payload.sender || (isGirl ? 'boy' : 'girl');
+    const myRole = window.App ? window.App.currentRole : 'boy';
+    const callerRole = payload.sender || (myRole === 'girl' ? 'boy' : 'girl');
     const settings = window.Storage ? window.Storage.getSettings() : {};
     let callerName = callerRole === 'girl' ? (settings.girlName || 'Jean') : (settings.boyName || 'Karthik');
     if (callerRole === 'girl' && callerName.toLowerCase().includes('jean')) callerName = 'Jean';
@@ -543,21 +555,26 @@ class DuoCallManager {
       ? (settings.girlAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767001/jean_u8zloq.png')
       : (settings.boyAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767000/peter_ayhcrs.png');
 
+    // Title on full popup screen: "Jean calling you" or "Karthik calling you"
     if (this.incomingName) this.incomingName.textContent = `${callerName} calling you`;
     if (this.incomingAvatar) {
       this.incomingAvatar.innerHTML = `<img src="${partnerAvatar}" class="call-avatar-img" alt="${callerName}">`;
     }
-    if (this.incomingType) this.incomingType.textContent = `Incoming ${this.currentCallType === 'video' ? 'Video' : 'Voice'} Call...`;
-
-    if (isChatActive) {
-      if (this.incomingModal) this.incomingModal.classList.add('active');
+    if (this.incomingType) {
+      this.incomingType.textContent = `Incoming ${this.currentCallType === 'video' ? 'Video' : 'Voice'} Call...`;
     }
 
-    if (isCallsAllowed) {
-      this.playRingtone(false);
-      if (window.VaultNotification) {
-        window.VaultNotification.notifyIncomingCall(payload);
-      }
+    // Always immediately present the full incoming call popup screen on top of everything!
+    if (this.incomingModal) {
+      this.incomingModal.classList.add('active');
+    }
+
+    // Ringtone
+    this.playRingtone(false);
+
+    // High priority system notification to wake device / show on recent apps
+    if (window.VaultNotification) {
+      window.VaultNotification.notifyIncomingCall(payload);
     }
   }
 
@@ -650,6 +667,12 @@ class DuoCallManager {
       };
 
       this.sendSignal('WEBRTC_ANSWER', { answer: safeAnswer });
+
+      // Ensure app view is switched to chat so active call is displayed seamlessly
+      const myRole = window.App ? window.App.currentRole : 'boy';
+      if (window.App && window.App.openChat) {
+        window.App.openChat(myRole);
+      }
 
       this.showActiveCallModal(false);
       this.onCallConnected();

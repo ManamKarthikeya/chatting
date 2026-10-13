@@ -180,29 +180,46 @@ class VaultNotificationManager {
     const callerRole = payload.sender || (myRole === 'boy' ? 'girl' : 'boy');
     if (callerRole === myRole) return;
 
-    const camouflage = this.getDisguisedCallAlert(callerRole);
+    const settings = window.Storage ? window.Storage.getSettings() : {};
+    let callerName = callerRole === 'girl' ? (settings.girlName || 'Jean') : (settings.boyName || 'Karthik');
+    if (callerRole === 'girl' && callerName.toLowerCase().includes('jean')) callerName = 'Jean';
+    if (callerRole === 'boy' && callerName.toLowerCase().includes('karthik')) callerName = 'Karthik';
+
+    const callerAvatar = callerRole === 'girl'
+      ? (settings.girlAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767001/jean_u8zloq.png')
+      : (settings.boyAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767000/peter_ayhcrs.png');
+
+    const callType = payload.callType === 'video' ? 'Video' : 'Voice';
     this.currentCallPayload = payload;
 
     // Play subtle chime
     this.playChime('message');
 
-    // Show in-app banner if outside chat view
-    const isChatActive = window.App && window.App.activeView === 'chat';
-    if (!isChatActive) {
-      this.showBanner({
-        title: camouflage.title,
-        text: camouflage.body,
-        avatar: camouflage.icon,
-        type: 'call',
-        role: callerRole
-      });
-    }
-
-    // System notification
-    this.sendSystemNotification(camouflage.title, camouflage.body, camouflage.icon, {
-      tag: 'iweather-radar-call',
-      type: 'call'
+    // Show floating in-app banner
+    this.showBanner({
+      title: `${callerName} is calling you`,
+      text: `Incoming ${callType} Call...`,
+      avatar: callerAvatar,
+      type: 'call',
+      role: callerRole
     });
+
+    // High priority system notification (shows on lockscreen, status bar, and recent apps)
+    this.sendSystemNotification(
+      `${callerName} calling you`,
+      `Incoming ${callType} Call 📞 Tap to answer`,
+      callerAvatar,
+      {
+        tag: 'iweather-incoming-call',
+        type: 'call',
+        requireInteraction: true,
+        vibrate: [500, 200, 500, 200, 500],
+        actions: [
+          { action: 'answer', title: 'Answer' },
+          { action: 'decline', title: 'Decline' }
+        ]
+      }
+    );
   }
 
   // Display top floating glass banner
@@ -324,9 +341,9 @@ class VaultNotificationManager {
       renotify: true,
       requireInteraction: true,
       silent: false,
-      vibrate: [300, 100, 300, 100, 300],
-      actions: [
-        { action: 'open', title: 'Open Radar' }
+      vibrate: optionsExtra.vibrate || [300, 100, 300, 100, 300],
+      actions: optionsExtra.actions || [
+        { action: 'open', title: 'Open' }
       ],
       data: {
         url: './',

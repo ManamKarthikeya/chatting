@@ -1,4 +1,4 @@
-const CACHE_NAME = 'iweather-v24';
+const CACHE_NAME = 'iweather-v25';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -45,11 +45,15 @@ self.addEventListener('activate', (event) => {
 // Handle notification tap to focus/open the app
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const action = event.action;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if (client.url && 'focus' in client) {
+          if (action) {
+            client.postMessage({ action: action });
+          }
           return client.focus();
         }
       }
