@@ -131,7 +131,7 @@ class StorageEngine {
             snapshot.docChanges().forEach((change) => {
               if (change.type === 'added') {
                 const data = change.doc.data();
-                if (data && data.timestamp > appStartTime) {
+                if (data) {
                   if (window.VaultNotification) {
                     window.VaultNotification.notifyMessage(data);
                   }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'iweather-v18';
+const CACHE_NAME = 'iweather-v19';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

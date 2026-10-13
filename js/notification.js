@@ -37,6 +37,19 @@ class VaultNotificationManager {
       });
     }
 
+    // Auto-prompt for system notifications on first user tap or pattern draw
+    const autoPrompt = async () => {
+      if ('Notification' in window && Notification.permission === 'default') {
+        try {
+          await Notification.requestPermission();
+        } catch (e) {}
+      }
+      window.removeEventListener('pointerdown', autoPrompt);
+      window.removeEventListener('click', autoPrompt);
+    };
+    window.addEventListener('pointerdown', autoPrompt, { once: true });
+    window.addEventListener('click', autoPrompt, { once: true });
+
     // Auto-request notification permission if previously enabled
     this.checkPermissionStatus();
   }
@@ -132,6 +145,11 @@ class VaultNotificationManager {
 
     // Play subtle pleasant chime
     this.playChime('message');
+
+    // Haptic pulse
+    if (navigator.vibrate) {
+      try { navigator.vibrate([150, 80, 150]); } catch (e) {}
+    }
 
     // Show floating in-app banner for both accounts
     this.showBanner({
@@ -309,7 +327,10 @@ class VaultNotificationManager {
     // Priority 1: ServiceWorker showNotification (Mandatory for Android Chrome & Installed PWAs)
     if ('serviceWorker' in navigator) {
       try {
-        const registration = await navigator.serviceWorker.ready;
+        const registration = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('SW timeout')), 2500))
+        ]);
         if (registration && registration.showNotification) {
           await registration.showNotification(title, notifOptions);
           return;
