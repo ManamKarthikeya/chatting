@@ -1,6 +1,7 @@
 /**
  * iWeather WebRTC Internet Voice & Video Calling Engine
  * Direct Peer-to-Peer encrypted audio and video calling between Karthikuuuuu and JeanGrey.
+ * Includes multi-port TURN relay (Metered OpenRelay), hardware audio bridge, and clock-drift resilience.
  */
 
 class DuoCallManager {
@@ -16,6 +17,15 @@ class DuoCallManager {
     this.callSeconds = 0;
     this.ringtoneOscillator = null;
     this.audioContext = null;
+
+    // Web Audio hardware direct output bridge
+    this.webAudioContext = null;
+    this.audioSourceNode = null;
+    this.audioGainNode = null;
+
+    // Signal tracking
+    this.processedDocIds = new Set();
+    this.candidateQueue = [];
 
     // DOM Elements
     this.btnVoiceCall = document.getElementById('btn-voice-call');
@@ -39,7 +49,6 @@ class DuoCallManager {
     this.remoteAudio = document.getElementById('remote-audio');
     this.remoteVideo = document.getElementById('remote-video');
     this.localVideo = document.getElementById('local-video');
-    this.candidateQueue = [];
 
     // Active Controls
     this.btnMuteMic = document.getElementById('btn-call-mute-mic');
@@ -61,15 +70,24 @@ class DuoCallManager {
   bindEvents() {
     // Header Call Buttons
     if (this.btnVoiceCall) {
-      this.btnVoiceCall.addEventListener('click', () => this.startCall('voice'));
+      this.btnVoiceCall.addEventListener('click', () => {
+        this.prewarmAudioHardware();
+        this.startCall('voice');
+      });
     }
     if (this.btnVideoCall) {
-      this.btnVideoCall.addEventListener('click', () => this.startCall('video'));
+      this.btnVideoCall.addEventListener('click', () => {
+        this.prewarmAudioHardware();
+        this.startCall('video');
+      });
     }
 
     // Incoming Call Controls
     if (this.btnIncomingAccept) {
-      this.btnIncomingAccept.addEventListener('click', () => this.acceptIncomingCall());
+      this.btnIncomingAccept.addEventListener('click', () => {
+        this.prewarmAudioHardware();
+        this.acceptIncomingCall();
+      });
     }
     if (this.btnIncomingDecline) {
       this.btnIncomingDecline.addEventListener('click', () => this.declineIncomingCall());
@@ -95,6 +113,30 @@ class DuoCallManager {
     }
   }
 
+  prewarmAudioHardware() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        if (!this.webAudioContext || this.webAudioContext.state === 'closed') {
+          this.webAudioContext = new AudioCtx();
+        }
+        if (this.webAudioContext.state === 'suspended') {
+          this.webAudioContext.resume();
+        }
+      }
+      if (this.remoteAudio) {
+        this.remoteAudio.muted = false;
+        this.remoteAudio.volume = 1.0;
+        this.remoteAudio.setAttribute('playsinline', '');
+        this.remoteAudio.setAttribute('webkit-playsinline', '');
+        const p = this.remoteAudio.play();
+        if (p !== undefined) p.catch(() => {});
+      }
+    } catch (e) {
+      console.warn('Audio pre-warm notice:', e);
+    }
+  }
+
   setupSignaling() {
     // 1. BroadcastChannel for local testing
     if (window.Storage && window.Storage.channel) {
@@ -113,7 +155,7 @@ class DuoCallManager {
       if (window.Storage && window.Storage.firestoreDb && window.Storage.isFirebaseActive) {
         this.listenFirestoreSignals();
       } else {
-        setTimeout(checkDb, 2500);
+        setTimeout(checkDb, 2000);
       }
     };
     checkDb();
@@ -122,15 +164,22 @@ class DuoCallManager {
   listenFirestoreSignals() {
     if (!window.Storage || !window.Storage.firestoreDb) return;
     try {
-      const startTime = Date.now() - 10000;
+      // 90 second buffer prevents clock drift between phones from dropping signals
+      const startTime = Date.now() - 90000;
       window.Storage.firestoreDb
         .collection('duo_signals')
         .where('timestamp', '>', startTime)
         .onSnapshot((snapshot) => {
           snapshot.docChanges().forEach((change) => {
             if (change.type === 'added') {
+              const docId = change.doc.id;
+              if (this.processedDocIds.has(docId)) return;
+              this.processedDocIds.add(docId);
+
               const data = change.doc.data();
               if (data && data.type && data.payload) {
+                // Ignore stale signals from older sessions (> 2 minutes old)
+                if (data.timestamp && Date.now() - data.timestamp > 120000) return;
                 this.processSignal(data.type, data.payload);
               }
             }
@@ -170,7 +219,8 @@ class DuoCallManager {
   sendSignal(type, payload) {
     const data = {
       ...payload,
-      sender: window.App ? window.App.currentRole : 'boy'
+      sender: window.App ? window.App.currentRole : 'boy',
+      timestamp: Date.now()
     };
 
     // Broadcast locally
@@ -181,73 +231,170 @@ class DuoCallManager {
     // Send over Firebase Firestore if active
     if (window.Storage && window.Storage.isFirebaseActive && window.Storage.firestoreDb) {
       try {
+        // Essential: Convert any non-plain objects to plain JSON to prevent Firestore rejection
+        const safeData = JSON.parse(JSON.stringify(data));
         window.Storage.firestoreDb.collection('duo_signals').add({
           type: type,
-          payload: data,
-          sender: data.sender,
+          payload: safeData,
+          sender: safeData.sender,
           timestamp: Date.now()
+        }).catch((err) => {
+          console.warn('Firestore add signal error:', err);
         });
       } catch (e) {
-        console.warn('Error sending signal to Firestore:', e);
+        console.warn('Error serializing signal for Firestore:', e);
       }
     }
   }
 
+  getIceServers() {
+    return [
+      // Google Global STUNs
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      // Mozilla STUN
+      { urls: 'stun:stun.services.mozilla.com' },
+      // Metered OpenRelay STUN & TURN Servers (Bypasses Carrier NAT & Strict Mobile Firewalls)
+      { urls: 'stun:openrelay.metered.ca:80' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
+    ];
+  }
+
   createPeerConnection() {
     const config = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:stun.services.mozilla.com' },
-        { urls: 'stun:stun.stunprotocol.org:3478' }
-      ]
+      iceServers: this.getIceServers(),
+      iceCandidatePoolSize: 10
     };
 
     this.peerConnection = new RTCPeerConnection(config);
 
-    // ICE Candidate
+    // ICE Candidate gathering
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        this.sendSignal('WEBRTC_CANDIDATE', { candidate: event.candidate });
+        const candData = event.candidate.toJSON
+          ? event.candidate.toJSON()
+          : {
+              candidate: event.candidate.candidate,
+              sdpMid: event.candidate.sdpMid,
+              sdpMLineIndex: event.candidate.sdpMLineIndex,
+              usernameFragment: event.candidate.usernameFragment
+            };
+        this.sendSignal('WEBRTC_CANDIDATE', { candidate: candData });
       }
     };
 
-    // Remote Track: Route to both remoteAudio and remoteVideo
+    // Track handling
     this.peerConnection.ontrack = (event) => {
-      console.log('WebRTC ontrack received track kind:', event.track.kind);
-      if (event.streams && event.streams[0]) {
-        this.remoteStream = event.streams[0];
-      } else {
+      console.log('WebRTC ontrack received:', event.track ? event.track.kind : 'unknown');
+      let stream = event.streams && event.streams[0];
+      if (!stream) {
         if (!this.remoteStream) {
           this.remoteStream = new MediaStream();
         }
         this.remoteStream.addTrack(event.track);
+        stream = this.remoteStream;
       }
+      this.attachRemoteMedia(stream, event.track ? event.track.kind : null);
+    };
 
-      // Always feed audio into dedicated remoteAudio element
-      if (this.remoteAudio) {
-        this.remoteAudio.srcObject = this.remoteStream;
-        this.remoteAudio.play().catch((err) => console.warn('remoteAudio play failed:', err));
-      }
-
-      // Also feed to remoteVideo element
-      if (this.remoteVideo) {
-        this.remoteVideo.srcObject = this.remoteStream;
-        this.remoteVideo.play().catch((err) => console.warn('remoteVideo play failed:', err));
+    // ICE Connection state
+    this.peerConnection.oniceconnectionstatechange = () => {
+      const state = this.peerConnection.iceConnectionState;
+      console.log('ICE Connection state:', state);
+      if (state === 'connected' || state === 'completed') {
+        this.onCallConnected();
+        if (this.activeTypeBadge) {
+          this.activeTypeBadge.textContent = this.currentCallType === 'video' ? 'HD Video Connected 🔒' : 'Encrypted Voice Connected 🔒';
+        }
+      } else if (state === 'checking') {
+        if (this.activeTypeBadge) {
+          this.activeTypeBadge.textContent = 'Connecting Voice...';
+        }
+      } else if (state === 'failed') {
+        console.warn('ICE connection failed! Attempting restart...');
+        if (this.activeTypeBadge) {
+          this.activeTypeBadge.textContent = 'Reconnecting...';
+        }
+        if (this.peerConnection.restartIce) {
+          this.peerConnection.restartIce();
+        }
       }
     };
 
     this.peerConnection.onconnectionstatechange = () => {
-      console.log('PeerConnection state change:', this.peerConnection.connectionState);
-      if (this.peerConnection.connectionState === 'connected') {
+      const state = this.peerConnection.connectionState;
+      console.log('PeerConnection state change:', state);
+      if (state === 'connected') {
         this.onCallConnected();
-      } else if (['disconnected', 'failed', 'closed'].includes(this.peerConnection.connectionState)) {
+      } else if (['disconnected', 'closed'].includes(state)) {
         this.endCall(false);
       }
     };
+  }
+
+  attachRemoteMedia(stream, trackKind) {
+    if (!stream) return;
+    this.remoteStream = stream;
+
+    // 1. Dedicated Remote Audio Pipe (Always unmuted, full volume)
+    if (this.remoteAudio) {
+      this.remoteAudio.srcObject = stream;
+      this.remoteAudio.volume = 1.0;
+      this.remoteAudio.muted = false;
+      this.remoteAudio.setAttribute('playsinline', '');
+      this.remoteAudio.setAttribute('webkit-playsinline', '');
+      const p = this.remoteAudio.play();
+      if (p !== undefined) {
+        p.catch((err) => console.warn('remoteAudio.play() info:', err));
+      }
+    }
+
+    // 2. Web Audio Direct Speaker Bridge (Guarantees loud speaker sound even if HTML audio element is throttled)
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx && stream.getAudioTracks().length > 0) {
+        if (!this.webAudioContext || this.webAudioContext.state === 'closed') {
+          this.webAudioContext = new AudioCtx();
+        }
+        if (this.webAudioContext.state === 'suspended') {
+          this.webAudioContext.resume();
+        }
+        if (!this.audioSourceNode) {
+          this.audioSourceNode = this.webAudioContext.createMediaStreamSource(stream);
+          this.audioGainNode = this.webAudioContext.createGain();
+          this.audioGainNode.gain.value = 1.0;
+          this.audioSourceNode.connect(this.audioGainNode);
+          this.audioGainNode.connect(this.webAudioContext.destination);
+          console.log('WebAudio Hardware Bridge: Connected to device output');
+        }
+      }
+    } catch (e) {
+      console.warn('WebAudio direct bridge notice:', e);
+    }
+
+    // 3. Remote Video Element (Only for video calls; keep video element muted so it doesn't conflict with remoteAudio)
+    if (this.currentCallType === 'video' && this.remoteVideo) {
+      this.remoteVideo.srcObject = stream;
+      this.remoteVideo.muted = true; // remoteAudio carries the unmuted sound
+      this.remoteVideo.play().catch((err) => console.warn('remoteVideo play failed:', err));
+    }
   }
 
   async startCall(type) {
@@ -257,16 +404,31 @@ class DuoCallManager {
     this.callState = 'calling';
 
     try {
-      // Get Media with clear audio processing
       const isVideo = type === 'video';
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: isVideo ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false
-      });
+      try {
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true }
+          },
+          video: isVideo ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false
+        });
+      } catch (e) {
+        // Fallback to basic audio
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: isVideo ? true : false
+        });
+      }
+
+      // Ensure local microphone tracks are enabled
+      if (this.localStream) {
+        this.localStream.getAudioTracks().forEach((track) => {
+          track.enabled = true;
+          console.log('Local mic track active:', track.label);
+        });
+      }
 
       if (this.localVideo && isVideo) {
         this.localVideo.srcObject = this.localStream;
@@ -274,7 +436,7 @@ class DuoCallManager {
 
       this.createPeerConnection();
 
-      // Add tracks
+      // Add tracks to connection
       this.localStream.getTracks().forEach((track) => {
         this.peerConnection.addTrack(track, this.localStream);
       });
@@ -286,9 +448,14 @@ class DuoCallManager {
       });
       await this.peerConnection.setLocalDescription(offer);
 
-      // Send Offer to Partner
+      // Send Offer to Partner as clean serializable plain object
+      const safeOffer = {
+        type: offer.type,
+        sdp: offer.sdp
+      };
+
       this.sendSignal('WEBRTC_OFFER', {
-        offer: offer,
+        offer: safeOffer,
         callType: type,
         partnerName: window.App && window.App.currentRole === 'girl' ? 'JeanGrey' : 'Karthikuuuuu'
       });
@@ -305,7 +472,6 @@ class DuoCallManager {
 
   async handleRemoteOffer(payload) {
     if (this.callState !== 'idle') {
-      // Busy
       this.sendSignal('WEBRTC_DECLINE', {});
       return;
     }
@@ -326,7 +492,6 @@ class DuoCallManager {
 
     this.callState = 'incoming';
 
-    // Format caller name accurately: e.g. "Jean" or "Karthik"
     const isGirl = window.App && window.App.currentRole === 'girl';
     const callerRole = payload.sender || (isGirl ? 'boy' : 'girl');
     const settings = window.Storage ? window.Storage.getSettings() : {};
@@ -338,28 +503,24 @@ class DuoCallManager {
       ? (settings.girlAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767001/jean_u8zloq.png')
       : (settings.boyAvatar || 'https://res.cloudinary.com/dmdrn1bge/image/upload/v1791767000/peter_ayhcrs.png');
 
-    // Title: "[Name] calling you"
     if (this.incomingName) this.incomingName.textContent = `${callerName} calling you`;
     if (this.incomingAvatar) {
       this.incomingAvatar.innerHTML = `<img src="${partnerAvatar}" class="call-avatar-img" alt="${callerName}">`;
     }
     if (this.incomingType) this.incomingType.textContent = `Incoming ${this.currentCallType === 'video' ? 'Video' : 'Voice'} Call...`;
 
-    // Only open the full modal immediately if in chat
     if (isChatActive) {
       if (this.incomingModal) this.incomingModal.classList.add('active');
     }
 
-    // Play ringtone and notify banner if allowed
     if (isCallsAllowed) {
-      this.playRingtone(false); // incoming ringtone
+      this.playRingtone(false);
       if (window.VaultNotification) {
         window.VaultNotification.notifyIncomingCall(payload);
       }
     }
   }
 
-  // Present incoming call once the user opens the private chat
   presentPendingCall() {
     if (this.callState === 'incoming_silent' && this.pendingCallPayload) {
       const payload = this.pendingCallPayload;
@@ -394,14 +555,28 @@ class DuoCallManager {
     const isVideo = this.currentCallType === 'video';
 
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: isVideo ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false
-      });
+      try {
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true }
+          },
+          video: isVideo ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false
+        });
+      } catch (e) {
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: isVideo ? true : false
+        });
+      }
+
+      if (this.localStream) {
+        this.localStream.getAudioTracks().forEach((track) => {
+          track.enabled = true;
+          console.log('Local mic track active:', track.label);
+        });
+      }
 
       if (this.localVideo && isVideo) {
         this.localVideo.srcObject = this.localStream;
@@ -422,15 +597,12 @@ class DuoCallManager {
       });
       await this.peerConnection.setLocalDescription(answer);
 
-      this.sendSignal('WEBRTC_ANSWER', { answer });
+      const safeAnswer = {
+        type: answer.type,
+        sdp: answer.sdp
+      };
 
-      // Unmute/play audio pipeline directly within user gesture
-      if (this.remoteAudio) {
-        this.remoteAudio.play().catch(() => {});
-      }
-      if (this.remoteVideo) {
-        this.remoteVideo.play().catch(() => {});
-      }
+      this.sendSignal('WEBRTC_ANSWER', { answer: safeAnswer });
 
       this.showActiveCallModal(false);
       this.onCallConnected();
@@ -454,12 +626,6 @@ class DuoCallManager {
     try {
       await this.peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
       await this.flushCandidateQueue();
-      if (this.remoteAudio) {
-        this.remoteAudio.play().catch(() => {});
-      }
-      if (this.remoteVideo) {
-        this.remoteVideo.play().catch(() => {});
-      }
       this.onCallConnected();
     } catch (err) {
       console.warn('Error setting remote answer:', err);
@@ -516,9 +682,11 @@ class DuoCallManager {
     this.callState = 'connected';
     this.startCallTimer();
 
-    if (this.activeTimer) this.activeTimer.textContent = '00:00';
+    if (this.activeTimer && this.activeTimer.textContent === 'Calling...') {
+      this.activeTimer.textContent = '00:00';
+    }
     if (this.activeTypeBadge) {
-      this.activeTypeBadge.textContent = this.currentCallType === 'video' ? 'HD Video Call' : 'Encrypted Voice Call';
+      this.activeTypeBadge.textContent = this.currentCallType === 'video' ? 'HD Video Connected 🔒' : 'Encrypted Voice Connected 🔒';
     }
   }
 
@@ -537,7 +705,9 @@ class DuoCallManager {
     }
     if (this.activeTimer) this.activeTimer.textContent = isCalling ? 'Calling...' : '00:00';
     if (this.activeTypeBadge) {
-      this.activeTypeBadge.textContent = this.currentCallType === 'video' ? 'Video Call' : 'Voice Call';
+      this.activeTypeBadge.textContent = isCalling
+        ? 'Calling...'
+        : (this.currentCallType === 'video' ? 'HD Video Call' : 'Encrypted Voice Call');
     }
 
     if (this.currentCallType === 'video') {
@@ -601,6 +771,20 @@ class DuoCallManager {
       this.sendSignal('WEBRTC_END', {});
     }
 
+    // Disconnect Web Audio Hardware Bridge
+    if (this.audioSourceNode) {
+      try { this.audioSourceNode.disconnect(); } catch (e) {}
+      this.audioSourceNode = null;
+    }
+    if (this.audioGainNode) {
+      try { this.audioGainNode.disconnect(); } catch (e) {}
+      this.audioGainNode = null;
+    }
+    if (this.webAudioContext && this.webAudioContext.state !== 'closed') {
+      try { this.webAudioContext.close(); } catch (e) {}
+      this.webAudioContext = null;
+    }
+
     // Stop all media tracks
     if (this.localStream) {
       this.localStream.getTracks().forEach((track) => track.stop());
@@ -632,12 +816,12 @@ class DuoCallManager {
     if (this.btnToggleCam) this.btnToggleCam.style.background = 'rgba(255, 255, 255, 0.15)';
   }
 
-  // Synthesized Pleasant Audio Ringtone (Zero MP3 files needed!)
+  // Synthesized Pleasant Audio Ringtone
   playRingtone(isOutgoing = false) {
     try {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContext) return;
-      this.audioContext = new AudioContext();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      this.audioContext = new AudioCtx();
 
       const freq1 = isOutgoing ? 440 : 480;
       const freq2 = isOutgoing ? 480 : 520;
@@ -659,9 +843,7 @@ class DuoCallManager {
       osc2.start();
 
       this.ringtoneOscillator = { osc1, osc2, gainNode };
-    } catch (e) {
-      // AudioContext autoplay restriction fallback
-    }
+    } catch (e) {}
   }
 
   stopRingtone() {

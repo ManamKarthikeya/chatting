@@ -454,3 +454,14 @@ button:active {
   justify-content: center;
   cursor: pointer;
 }
+
+/* Remote audio playback element - keep rendered so browser never throttles */
+#remote-audio {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0.01;
+  pointer-events: none;
+}
