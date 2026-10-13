@@ -309,6 +309,11 @@ class VaultNotificationManager {
   // System Push / Android Notification
   async sendSystemNotification(title, body, iconUrl, optionsExtra = {}) {
     if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      try {
+        await Notification.requestPermission();
+      } catch (e) {}
+    }
     if (Notification.permission !== 'granted') return;
 
     const notifOptions = {
@@ -317,7 +322,12 @@ class VaultNotificationManager {
       badge: 'icons/icon-192.png',
       tag: optionsExtra.tag || 'iweather-alert',
       renotify: true,
-      vibrate: [200, 100, 200],
+      requireInteraction: true,
+      silent: false,
+      vibrate: [300, 100, 300, 100, 300],
+      actions: [
+        { action: 'open', title: 'Open Radar' }
+      ],
       data: {
         url: './',
         type: optionsExtra.type || 'message'
