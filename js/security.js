@@ -1,7 +1,7 @@
 /**
  * iWeather Security Manager
  * Manages auto-lock on recent apps / background switching.
- * Screenshot and screen recording protection disabled as requested.
+ * Safe against in-app dialogs (file picker, microphone/camera permission prompts, and ongoing calls).
  */
 
 class VaultSecurityManager {
@@ -15,26 +15,10 @@ class VaultSecurityManager {
 
   // Auto-Lock on Recent Apps & Background Switching
   bindWindowFocusListeners() {
-    this.blurLockTimeout = null;
-
-    // When window loses focus (e.g. mobile recent apps gesture, task switching)
-    window.addEventListener('blur', () => {
-      if (this.isChatActive()) {
-        clearTimeout(this.blurLockTimeout);
-        this.blurLockTimeout = setTimeout(() => {
-          if (!document.hasFocus() || document.visibilityState === 'hidden') {
-            if (this.isChatActive() && window.App && window.App.lockVault) {
-              window.App.lockVault();
-            }
-          }
-        }, 350);
-      }
-    });
-
     // When visibility state changes (recent apps, app minimized, screen turned off)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
-        if (this.isChatActive()) {
+        if (this.isEligibleToLock()) {
           if (window.App && window.App.lockVault) {
             window.App.lockVault();
           }
@@ -44,12 +28,27 @@ class VaultSecurityManager {
 
     // Mobile OS pagehide event (fired when mobile OS moves app to recent / background)
     window.addEventListener('pagehide', () => {
-      if (this.isChatActive()) {
+      if (this.isEligibleToLock()) {
         if (window.App && window.App.lockVault) {
           window.App.lockVault();
         }
       }
     });
+  }
+
+  isEligibleToLock() {
+    // Don't lock if not in private chat
+    if (!this.isChatActive()) return false;
+
+    // Don't lock if user is selecting a photo or file
+    if (window.isSelectingFile) return false;
+
+    // Don't lock if a call is ongoing or being dialed/answered
+    if (window.DuoCallManagerInstance && window.DuoCallManagerInstance.callState !== 'idle') {
+      return false;
+    }
+
+    return true;
   }
 
   isChatActive() {

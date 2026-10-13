@@ -126,8 +126,20 @@ class DuoChat {
 
     // Attach Photos, Videos, and Files
     if (this.attachFileBtn && this.fileInput) {
-      this.attachFileBtn.addEventListener('click', () => this.fileInput.click());
-      this.fileInput.addEventListener('change', (e) => this.handleMediaSelected(e));
+      this.attachFileBtn.addEventListener('click', () => {
+        window.isSelectingFile = true;
+        this.fileInput.click();
+      });
+      this.fileInput.addEventListener('change', (e) => {
+        window.isSelectingFile = false;
+        this.handleMediaSelected(e);
+      });
+      this.fileInput.addEventListener('cancel', () => {
+        window.isSelectingFile = false;
+      });
+      window.addEventListener('focus', () => {
+        setTimeout(() => { window.isSelectingFile = false; }, 800);
+      });
     }
 
     // Voice Note Recording
