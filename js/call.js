@@ -36,8 +36,10 @@ class DuoCallManager {
     this.activeTimer = document.getElementById('active-call-timer');
     this.activeTypeBadge = document.getElementById('active-call-type-badge');
 
+    this.remoteAudio = document.getElementById('remote-audio');
     this.remoteVideo = document.getElementById('remote-video');
     this.localVideo = document.getElementById('local-video');
+    this.candidateQueue = [];
 
     // Active Controls
     this.btnMuteMic = document.getElementById('btn-call-mute-mic');
@@ -195,7 +197,12 @@ class DuoCallManager {
     const config = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.services.mozilla.com' },
+        { urls: 'stun:stun.stunprotocol.org:3478' }
       ]
     };
 
@@ -208,15 +215,33 @@ class DuoCallManager {
       }
     };
 
-    // Remote Track
+    // Remote Track: Route to both remoteAudio and remoteVideo
     this.peerConnection.ontrack = (event) => {
-      this.remoteStream = event.streams[0];
+      console.log('WebRTC ontrack received track kind:', event.track.kind);
+      if (event.streams && event.streams[0]) {
+        this.remoteStream = event.streams[0];
+      } else {
+        if (!this.remoteStream) {
+          this.remoteStream = new MediaStream();
+        }
+        this.remoteStream.addTrack(event.track);
+      }
+
+      // Always feed audio into dedicated remoteAudio element
+      if (this.remoteAudio) {
+        this.remoteAudio.srcObject = this.remoteStream;
+        this.remoteAudio.play().catch((err) => console.warn('remoteAudio play failed:', err));
+      }
+
+      // Also feed to remoteVideo element
       if (this.remoteVideo) {
         this.remoteVideo.srcObject = this.remoteStream;
+        this.remoteVideo.play().catch((err) => console.warn('remoteVideo play failed:', err));
       }
     };
 
     this.peerConnection.onconnectionstatechange = () => {
+      console.log('PeerConnection state change:', this.peerConnection.connectionState);
       if (this.peerConnection.connectionState === 'connected') {
         this.onCallConnected();
       } else if (['disconnected', 'failed', 'closed'].includes(this.peerConnection.connectionState)) {
@@ -232,10 +257,14 @@ class DuoCallManager {
     this.callState = 'calling';
 
     try {
-      // Get Media
+      // Get Media with clear audio processing
       const isVideo = type === 'video';
       this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
         video: isVideo ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false
       });
 
@@ -250,8 +279,11 @@ class DuoCallManager {
         this.peerConnection.addTrack(track, this.localStream);
       });
 
-      // Create Offer
-      const offer = await this.peerConnection.createOffer();
+      // Create Offer with explicit audio/video receive flags
+      const offer = await this.peerConnection.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: isVideo
+      });
       await this.peerConnection.setLocalDescription(offer);
 
       // Send Offer to Partner
@@ -363,7 +395,11 @@ class DuoCallManager {
 
     try {
       this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
         video: isVideo ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false
       });
 
@@ -378,10 +414,23 @@ class DuoCallManager {
       });
 
       await this.peerConnection.setRemoteDescription(new RTCSessionDescription(this.pendingOffer));
-      const answer = await this.peerConnection.createAnswer();
+      await this.flushCandidateQueue();
+
+      const answer = await this.peerConnection.createAnswer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: isVideo
+      });
       await this.peerConnection.setLocalDescription(answer);
 
       this.sendSignal('WEBRTC_ANSWER', { answer });
+
+      // Unmute/play audio pipeline directly within user gesture
+      if (this.remoteAudio) {
+        this.remoteAudio.play().catch(() => {});
+      }
+      if (this.remoteVideo) {
+        this.remoteVideo.play().catch(() => {});
+      }
 
       this.showActiveCallModal(false);
       this.onCallConnected();
@@ -404,6 +453,13 @@ class DuoCallManager {
     if (!this.peerConnection) return;
     try {
       await this.peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
+      await this.flushCandidateQueue();
+      if (this.remoteAudio) {
+        this.remoteAudio.play().catch(() => {});
+      }
+      if (this.remoteVideo) {
+        this.remoteVideo.play().catch(() => {});
+      }
       this.onCallConnected();
     } catch (err) {
       console.warn('Error setting remote answer:', err);
@@ -411,11 +467,27 @@ class DuoCallManager {
   }
 
   async handleRemoteCandidate(payload) {
-    if (!this.peerConnection || !payload.candidate) return;
+    if (!payload || !payload.candidate) return;
+    if (!this.peerConnection || !this.peerConnection.remoteDescription || !this.peerConnection.remoteDescription.type) {
+      this.candidateQueue.push(payload.candidate);
+      return;
+    }
     try {
       await this.peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
     } catch (err) {
       console.warn('Error adding ICE candidate:', err);
+    }
+  }
+
+  async flushCandidateQueue() {
+    if (!this.peerConnection || !this.peerConnection.remoteDescription) return;
+    while (this.candidateQueue.length > 0) {
+      const cand = this.candidateQueue.shift();
+      try {
+        await this.peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (err) {
+        console.warn('Error flushing ICE candidate:', err);
+      }
     }
   }
 
@@ -546,6 +618,11 @@ class DuoCallManager {
 
     if (this.incomingModal) this.incomingModal.classList.remove('active');
     if (this.activeModal) this.activeModal.classList.remove('active');
+
+    if (this.remoteAudio) this.remoteAudio.srcObject = null;
+    if (this.remoteVideo) this.remoteVideo.srcObject = null;
+    if (this.localVideo) this.localVideo.srcObject = null;
+    this.candidateQueue = [];
 
     this.callState = 'idle';
     this.isMicMuted = false;
